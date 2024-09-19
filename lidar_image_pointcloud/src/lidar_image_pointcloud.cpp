@@ -11,14 +11,16 @@ namespace sensing
 LidarImagePointcloud::LidarImagePointcloud(const rclcpp::NodeOptions &options)
     : Node("rgb_pointcloud_processor", options)
 {
+    const std::string cam_name = "fsp_l";
+    // const std::string cam_name = "rsp_l";
     const std::string lidar_topic = "/sensor/lidar/top/points";
-    // const std::string image_raw_topic = "/sensor/camera/fsp_l/image_raw";
-    const std::string image_raw_topic = "/sensor/camera/fsp_l/image_rect_color";
-    const std::string camera_info_topic = "/sensor/camera/fsp_l/camera_info";
+    // const std::string image_raw_topic = "/sensor/camera/" + cam_name+ "/image_raw";
+    const std::string image_raw_topic = "/sensor/camera/"+ cam_name + "/image_rect_color";
+    const std::string camera_info_topic = "/sensor/camera/" + cam_name +"/camera_info";
     const std::string rgb_pointcloud_topic = "/sensor/lidar/top/rgb_points";
 
     lidar_frame_ = "lidar_ouster_top";
-    camera_frame_ = "camera_fsp_l_optical";
+    camera_frame_ = "camera_" + cam_name + "_optical";
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -115,7 +117,7 @@ void LidarImagePointcloud::pointcloud_callback(
         float u = (camera_info_->k[0] * point.x() / point.z()) + camera_info_->k[2];
         float v = (camera_info_->k[4] * point.y() / point.z()) + camera_info_->k[5];
 
-        if (u >= 0 && u < last_image_->width && v >= 0 && v < last_image_->height) {
+        if (point.z() > 0 && u >= 0 && u < last_image_->width && v >= 0 && v < last_image_->height) {
             // Get pixel color from image
             int idx = static_cast<int>(v) * last_image_->step + static_cast<int>(u) * 3;
             iter_rgb[0] = last_image_->data[idx];
