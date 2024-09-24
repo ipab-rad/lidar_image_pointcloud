@@ -24,8 +24,6 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(cv_bridge REQUIRED)
-find_package(image_geometry REQUIRED)
 find_package(image_transport REQUIRED)
 
 include_directories(include)
@@ -41,8 +39,6 @@ ament_target_dependencies(lidar_image_pointcloud_component
   tf2_ros
   tf2_geometry_msgs
   geometry_msgs
-  cv_bridge
-  image_geometry
   image_transport
 )
 

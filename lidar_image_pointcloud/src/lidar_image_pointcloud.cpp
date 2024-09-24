@@ -1,11 +1,9 @@
-#include "cv_bridge/cv_bridge.h"
-#include <opencv2/imgproc/imgproc.hpp>
 
 #include "lidar_image_pointcloud/lidar_image_pointcloud.hpp"
-#include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 #include <chrono>
+#include <thread>
 
 namespace sensing
 {
@@ -15,11 +13,12 @@ LidarImagePointcloud::LidarImagePointcloud(const rclcpp::NodeOptions &options)
 {
 
     cam_names_ = this->declare_parameter<std::vector<std::string>>("camera_names", {"fsp_l"});
-
-    const std::string lidar_topic = "/sensor/lidar/top/points";
-    const std::string rgb_pointcloud_topic = "/sensor/lidar/top/rgb_points";
-
-    lidar_frame_ = "lidar_ouster_top";
+    num_threads_ = this->declare_parameter<int>("num_threads", 4);
+    lidar_frame_ = this->declare_parameter<std::string>("lidar_frame", "lidar_ouster_top");
+    const std::string lidar_topic =
+        this->declare_parameter<std::string>("lidar_topic", "/sensor/lidar/top/points");
+    const std::string rgb_pointcloud_topic = this->declare_parameter<std::string>(
+        "rgb_pointcloud_topic", "/sensor/lidar/top/rgb_points");
 
     tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -88,8 +87,52 @@ void LidarImagePointcloud::extract_transforms(std::vector<std::string> &cam_name
     }
 }
 
+void LidarImagePointcloud::process_slice(sensor_msgs::msg::PointCloud2 &rgb_pointcloud,
+                                         sensor_msgs::PointCloud2Iterator<float> iter_x,
+                                         size_t start_idx, size_t end_idx)
+{
+
+    sensor_msgs::PointCloud2Iterator<uint8_t> iter_rgb(rgb_pointcloud, "rgb");
+    iter_rgb += start_idx;
+
+    iter_x += start_idx;
+
+    for (size_t i = start_idx; i < end_idx; ++i, ++iter_x, ++iter_rgb)
+    {
+        float x = iter_x[0];
+        float y = iter_x[1];
+        float z = iter_x[2];
+
+        tf2::Vector3 lidar_point(x, y, z);
+
+        for (const auto &[cam_name, img_msg] : images_)
+        {
+            // Transform lidar point into camera frame
+            auto cam_cartesian_point = cam_tf_map_.at(cam_name) * lidar_point;
+
+            // Project into image plane
+            float u = (cam_info_map_.at(cam_name)->k[0] * cam_cartesian_point.x() /
+                       cam_cartesian_point.z()) +
+                      cam_info_map_.at(cam_name)->k[2];
+            float v = (cam_info_map_.at(cam_name)->k[4] * cam_cartesian_point.y() /
+                       cam_cartesian_point.z()) +
+                      cam_info_map_.at(cam_name)->k[5];
+
+            if (cam_cartesian_point.z() > 0 && u >= 0 && u < img_msg->width && v >= 0 &&
+                v < img_msg->height)
+            {
+                // Get pixel color from image
+                int idx = static_cast<int>(v) * img_msg->step + static_cast<int>(u) * 3;
+                iter_rgb[0] = img_msg->data[idx];     // Red
+                iter_rgb[1] = img_msg->data[idx + 1]; // Green
+                iter_rgb[2] = img_msg->data[idx + 2]; // Blue
+            }
+        }
+    }
+}
+
 void LidarImagePointcloud::pointcloud_callback(
-    const sensor_msgs ::msg::PointCloud2::SharedPtr pointcloud_msg)
+    const sensor_msgs::msg::PointCloud2::SharedPtr pointcloud_msg)
 {
     // In case the node executor is multi-threaded
     std::lock_guard<std::mutex> lock(data_mutex_);
@@ -113,64 +156,42 @@ void LidarImagePointcloud::pointcloud_callback(
     sensor_msgs::PointCloud2Modifier pcd_modifier(rgb_pointcloud);
     pcd_modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
 
-    // Iterate over point cloud
     sensor_msgs::PointCloud2Iterator<float> iter_x(rgb_pointcloud, "x");
-    sensor_msgs::PointCloud2Iterator<uint8_t> iter_rgb(rgb_pointcloud, "rgb");
 
-    for (; iter_x != iter_x.end(); ++iter_x, ++iter_rgb)
+    // Total number of points
+    size_t point_count = rgb_pointcloud.width * rgb_pointcloud.height;
+
+    // Divide the work into slices
+    size_t pointcloud_slice_size = point_count / num_threads_;
+    std::vector<std::thread> threads;
+
+    for (size_t i = 0; i < num_threads_; ++i)
     {
-        float x = iter_x[0];
-        float y = iter_x[1];
-        float z = iter_x[2];
+        // Calculate the range for the current thread
+        size_t start_idx = i * pointcloud_slice_size;
+        size_t end_idx = (i == num_threads_ - 1) ? point_count : start_idx + pointcloud_slice_size;
 
-        tf2::Vector3 lidar_point(x, y, z);
+        // Launch a thread to process each slice
+        threads.emplace_back(&LidarImagePointcloud::process_slice, this, std::ref(rgb_pointcloud),
+                             iter_x, start_idx, end_idx);
+    }
 
-        for (const auto &[cam_name, img_msg] : images_)
-        {
-            // Transform lidar point into camera frame
-            auto cam_cartesian_point = cam_tf_map_[cam_name] * lidar_point;
-
-            // Project into image plane
-            float u = (cam_info_map_[cam_name]->k[0] * cam_cartesian_point.x() /
-                       cam_cartesian_point.z()) +
-                      cam_info_map_[cam_name]->k[2];
-            float v = (cam_info_map_[cam_name]->k[4] * cam_cartesian_point.y() /
-                       cam_cartesian_point.z()) +
-                      cam_info_map_[cam_name]->k[5];
-
-            if (cam_cartesian_point.z() > 0 && u >= 0 && u < img_msg->width && v >= 0 &&
-                v < img_msg->height)
-            {
-                // Get pixel color from image
-                int idx = static_cast<int>(v) * img_msg->step + static_cast<int>(u) * 3;
-                iter_rgb[0] = img_msg->data[idx];
-                iter_rgb[1] = img_msg->data[idx + 1];
-                iter_rgb[2] = img_msg->data[idx + 2];
-            }
-        }
+    for (auto &t : threads)
+    {
+        if (t.joinable())
+            t.join();
     }
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
     RCLCPP_INFO(this->get_logger(), "Computaton time: %f ms", duration.count());
-    // Publish the RGB PointCloud
+
     rgb_pointcloud_pub_->publish(rgb_pointcloud);
 }
 
 rmw_qos_profile_t LidarImagePointcloud::get_topic_qos_profie(rclcpp::Node *node,
                                                              const std::string &topic)
 {
-    /**
-    * Given a topic name, get the QoS profile with which it is being published.
-￼   * Replaces history and depth settings with default sensor values since they cannot be retrieved.
-    * @param node pointer to the ROS node
-    * @param topic name of the topic
-    * @returns QoS profile of the publisher to the topic. If there are several publishers, it
-returns
-    *     returns the profile of the first one on the list. If no publishers exist, it returns
-    *     the sensor data profile.
-    */
-
     std::string topic_resolved =
         node->get_node_base_interface()->resolve_topic_or_service_name(topic, false);
     auto topics_info = node->get_publishers_info_by_topic(topic_resolved);
@@ -187,34 +208,7 @@ returns
     }
 }
 
-// void LidarImagePointcloud::rectify_image()
-// {
-//     std::lock_guard<std::mutex> lock(data_mutex_);
-
-//     auto raw_msg = last_image_;
-
-//     // Convert raw image into CV mat
-//     int bit_depth = sensor_msgs::image_encodings::bitDepth(raw_msg->encoding);
-//     int type = bit_depth == 8 ? CV_8U : CV_16U;
-
-//     const cv::Mat bayer(raw_msg->height, raw_msg->width, CV_MAKETYPE(type, 1),
-//                         const_cast<uint8_t *>(&raw_msg->data[0]), raw_msg->step);
-
-//     int rgb_step = raw_msg->width * 3 * (bit_depth / 8);
-//     size_t rgb_data_vector_size = raw_msg->height * rgb_step;
-//     // Create CV mat for color mat
-//     std::vector<uint8_t> color_data(rgb_data_vector_size);
-//     color_data.resize(rgb_data_vector_size);
-
-//     cv::Mat color(raw_msg->height, raw_msg->width, CV_MAKETYPE(type, 3), color_data.data(),
-//                   rgb_step);
-// }
-
 }
 
 #include "rclcpp_components/register_node_macro.hpp"
-
-// Register the component with class_loader.
-// This acts as a sort of entry point, allowing the component to be discoverable when its library
-// is being loaded into a running process.
 RCLCPP_COMPONENTS_REGISTER_NODE(sensing::LidarImagePointcloud)
