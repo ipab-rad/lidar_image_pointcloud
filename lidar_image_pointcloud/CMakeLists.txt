@@ -10,11 +10,6 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-find_package(OpenCV REQUIRED)
-if(OpenCV_VERSION VERSION_LESS "3.2.0")
-  message(FATAL "Minimum OpenCV version is 3.2.0 (found version ${OpenCV_VERSION})")
-endif()
-
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
@@ -40,12 +35,6 @@ ament_target_dependencies(lidar_image_pointcloud_component
   tf2_geometry_msgs
   geometry_msgs
   image_transport
-)
-
-
-
-target_link_libraries(lidar_image_pointcloud_component
-  ${OpenCV_LIBRARIES}
 )
 
 rclcpp_components_register_node(
