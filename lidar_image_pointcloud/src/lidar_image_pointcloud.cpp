@@ -30,7 +30,7 @@ LidarImagePointcloud::LidarImagePointcloud(const rclcpp::NodeOptions &options)
     subscribe_to_cameras(cam_names_);
 
     rgb_pointcloud_pub_ =
-        this->create_publisher<sensor_msgs::msg::PointCloud2>("rgb_pointcloud", 10);
+        this->create_publisher<sensor_msgs::msg::PointCloud2>(rgb_pointcloud_topic, 10);
 
     extract_transforms(cam_names_);
 
