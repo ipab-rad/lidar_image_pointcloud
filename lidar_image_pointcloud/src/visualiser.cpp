@@ -19,6 +19,7 @@
 #include <vector>
 #include <algorithm>
 #include <regex>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -89,18 +90,92 @@ public:
     : cloud_(std::make_shared<pcl::PointCloud<DefaultPointType>>()) {
 
     // Hardcode the tf and camera intrinsics :)
-    Eigen::AngleAxisd roll(-1.664539, Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd pitch(-0.009410, Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd yaw(-3.130936, Eigen::Vector3d::UnitZ());
+    double offset_x = 0.0;
+    double offset_y = 0.0;
+    double offset_z = 0.0;
+
+    // to_radians()
+    auto to_radians = [](double degrees) {
+      return degrees * M_PI / 180.0;
+    };
+
+    // // Front camera
+    // double offset_roll = to_radians(0.0);
+    // double offset_pitch = to_radians(0.0);
+    // double offset_yaw = to_radians(0.0);
+
+    // Eigen::AngleAxisd roll(-1.657167 + offset_roll, Eigen::Vector3d::UnitX());
+    // Eigen::AngleAxisd pitch(-0.005290 + offset_pitch, Eigen::Vector3d::UnitY());
+    // Eigen::AngleAxisd yaw(-3.134462 + offset_yaw, Eigen::Vector3d::UnitZ());
+
+    // transform_.setIdentity();
+    // transform_.block<3,3>(0,0) = (yaw * pitch * roll).toRotationMatrix();
+    // transform_.block<3,1>(0,3) = Eigen::Vector3d(0.310712, -0.320906, -0.655147);
+
+    // K_.setIdentity();
+    // K_(0,0) = 1451.49531;
+    // K_(0,2) = 1218.93228;
+    // K_(1,1) = 1450.7118;
+    // K_(1,2) = 683.50770999999997;
+
+    // ------------- rspr_r------------
+    // double offset_roll = to_radians(0);
+    // double offset_pitch = to_radians(0);
+    // double offset_yaw = to_radians(0);
+
+    // Eigen::AngleAxisd roll(1.784 + offset_roll, Eigen::Vector3d::UnitX());
+    // Eigen::AngleAxisd pitch(1.151 + offset_pitch, Eigen::Vector3d::UnitY());
+    // Eigen::AngleAxisd yaw(0.2 + offset_yaw, Eigen::Vector3d::UnitZ());
+
+    // transform_.setIdentity();
+    // transform_.block<3,3>(0,0) = (yaw * pitch * roll).toRotationMatrix();
+    // transform_.block<3,1>(0,3) = Eigen::Vector3d(-0.075, -0.233, -0.696);
+
+    // K_.setIdentity();
+    // K_(0,0) = 1447.00739;
+    // K_(0,2) = 1213.124;
+    // K_(1,1) = 1447.206;
+    // K_(1,2) = 686.80;
+
+    // --------lspf_r -----------
+    double offset_roll = to_radians(0);
+    double offset_pitch = to_radians(0);
+    double offset_yaw = to_radians(0);
+
+    Eigen::AngleAxisd roll(-1.811 + offset_roll, Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd pitch( -1.153 + offset_pitch, Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd yaw(-2.930 + offset_yaw, Eigen::Vector3d::UnitZ());
+
     transform_.setIdentity();
     transform_.block<3,3>(0,0) = (yaw * pitch * roll).toRotationMatrix();
-    transform_.block<3,1>(0,3) = Eigen::Vector3d(0.288239, -0.314501, -0.672622);
+    transform_.block<3,1>(0,3) = Eigen::Vector3d( 0.240, -0.267, -0.521);
 
     K_.setIdentity();
-    K_(0,0) = 1451.49531;
-    K_(0,2) = 1218.93228;
-    K_(1,1) = 1450.7118;
-    K_(1,2) = 683.50770999999997;
+    K_(0,0) = 1444.38913;
+    K_(0,2) = 1162.8855;
+    K_(1,1) = 1442.8811;
+    K_(1,2) = 716.39319;
+
+
+    // // --------lspr_l -----------
+    // double offset_roll = to_radians(0);
+    // double offset_pitch = to_radians(0);
+    // double offset_yaw = to_radians(0);
+
+    // Eigen::AngleAxisd roll(1.767 + offset_roll, Eigen::Vector3d::UnitX());
+    // Eigen::AngleAxisd pitch( -1.125 + offset_pitch, Eigen::Vector3d::UnitY());
+    // Eigen::AngleAxisd yaw(-0.185 + offset_yaw, Eigen::Vector3d::UnitZ());
+
+    // transform_.setIdentity();
+    // transform_.block<3,3>(0,0) = (yaw * pitch * roll).toRotationMatrix();
+    // transform_.block<3,1>(0,3) = Eigen::Vector3d( 0.113, -0.257, -0.631);
+
+    // K_.setIdentity();
+    // K_(0,0) = 1465.059;
+    // K_(0,2) = 1171.9781;
+    // K_(1,1) = 1464.7980299999999;
+    // K_(1,2) = 666.86659999999995;
+
   }
 
   void run(const fs::path& pcd_dir, const fs::path& img_dir) {
@@ -117,10 +192,14 @@ public:
 
     loadPCD(pcd_files_[pcd_idx_].path);
     loadImage(img_files_[img_idx_].path);
-    double max_distance_m = 15.0; // Adjust as needed
+    double max_distance_m = 100.0; // Adjust as needed
 
     // project(max_distance_m);
     project_with_marker_dots(max_distance_m);
+    std::stringstream ss_log;
+    ss_log << "[PCD: "<<pcd_idx_<<" ] " << pcd_files_[pcd_idx_].path.filename() << " | [IMG: "<<img_idx_<<"] "
+            << img_files_[img_idx_].path.filename()
+            << '\n';
     display();
 
     while (true) {
@@ -157,10 +236,13 @@ public:
         uint64_t image_ts = img_files_[img_idx_].timestamp;
         int64_t diff = image_ts - pointcloud_ts;
         double diff_ms = static_cast<double>(diff) / 1e6;
-        std::cout << "[PCD: "<<pcd_idx_<<" ] " << pcd_files_[pcd_idx_].path.filename() << " | [IMG: "<<img_idx_<<"] "
+        std::stringstream ss_log;
+        ss_log << "[PCD: "<<pcd_idx_<<" ] " << pcd_files_[pcd_idx_].path.filename() << " | [IMG: "<<img_idx_<<"] "
                   << img_files_[img_idx_].path.filename()
                   << " | Time diff (image_time - lidar_time): " << diff_ms << " ms"
                   << '\n';
+        std::cout << ss_log.str();
+
         loadPCD(pcd_files_[pcd_idx_].path);
         loadImage(img_files_[img_idx_].path);
         // project(max_distance_m);
@@ -224,6 +306,7 @@ private:
   }
 
   void display() {
+    // cv::namedWindow("Projection", cv::WINDOW_NORMAL);
     cv::imshow("Projection", image_);
   }
 
