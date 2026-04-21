@@ -5,6 +5,8 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive \
         apt-get -y --quiet --no-install-recommends install \
         curl \
+        libpcl-dev \
+        libopencv-dev \
         ros-"$ROS_DISTRO"-ament-cmake-clang-format \
         ros-"$ROS_DISTRO"-image-transport \
         ros-"$ROS_DISTRO"-image-transport-plugins \
@@ -49,6 +51,7 @@ RUN apt-get update \
         apt-get -y --quiet --no-install-recommends install \
         # Command-line editor
         nano \
+        gedit \
         # Ping network tools
         inetutils-ping \
         # Bash auto-completion for convenience

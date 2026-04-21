@@ -52,6 +52,25 @@ install(TARGETS lidar_image_pointcloud_component
         RUNTIME DESTINATION bin
 )
 
+find_package(PCL REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(Eigen3 REQUIRED)
+
+
+add_executable(visualiser src/visualiser.cpp)
+
+target_include_directories(visualiser PRIVATE
+  ${OpenCV_INCLUDE_DIRS}
+  ${PCL_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIR}  # <- Add this
+)
+
+target_link_libraries(visualiser ${PCL_LIBRARIES} ${OpenCV_LIBS} Eigen3::Eigen)
+
+install(TARGETS
+  visualiser
+  DESTINATION lib/${PROJECT_NAME})
+
 # Install launch files.
 install(DIRECTORY
   launch
